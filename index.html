@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Three.js Cube Grid</title>
+  <style>
+    body { margin: 0; background-color: #0f1014; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <script type="module">
+    import * as THREE from 'https://unpkg.com/three@0.158.0/build/three.module.js';
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x202533);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 8, 12);
+    camera.lookAt(0, 0, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const gridSize = 10;
+    const spacing = 1.4;
+    const totalSpan = (gridSize - 1) * spacing;
+    const offset = totalSpan / 2;
+
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const colorPalette = [0xff5533, 0x209cee, 0xffdd57, 0x23d160, 0xb86bff, 0xff9f1c];
+    const materials = colorPalette.map(color => new THREE.MeshStandardMaterial({ color }));
+
+    const cubeGroup = new THREE.Group();
+
+    for (let row = 0; row < gridSize; row += 1) {
+      for (let col = 0; col < gridSize; col += 1) {
+        const material = materials[Math.floor(Math.random() * materials.length)];
+        const cube = new THREE.Mesh(geometry, material);
+        cube.position.set(col * spacing - offset, 0, row * spacing - offset);
+        cubeGroup.add(cube);
+      }
+    }
+
+    scene.add(cubeGroup);
+
+    const cursorEdgesGeometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(1.05, 1.05, 1.05));
+    const cursorMaterial = new THREE.LineBasicMaterial({ color: 0xffffff });
+    cursorMaterial.depthTest = false;
+    cursorMaterial.depthWrite = false;
+
+    const cursorLeft = new THREE.LineSegments(cursorEdgesGeometry, cursorMaterial);
+    const cursorRight = new THREE.LineSegments(cursorEdgesGeometry, cursorMaterial);
+    cursorLeft.position.x = -spacing / 2;
+    cursorRight.position.x = spacing / 2;
+    cursorLeft.position.y = 0.02;
+    cursorRight.position.y = 0.02;
+
+    const cursorGroup = new THREE.Group();
+    cursorGroup.add(cursorLeft, cursorRight);
+    cursorGroup.renderOrder = 1;
+    scene.add(cursorGroup);
+
+    const cursorState = {
+      col: Math.floor((gridSize - 2) / 2),
+      row: Math.floor((gridSize - 1) / 2),
+    };
+
+    const updateCursorPosition = () => {
+      const x = (cursorState.col + 0.5) * spacing - offset;
+      const z = cursorState.row * spacing - offset;
+      cursorGroup.position.set(x, 0, z);
+    };
+
+    updateCursorPosition();
+
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(6, 10, 8);
+    scene.add(light);
+
+    const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+    scene.add(ambient);
+
+    const handleResize = () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    };
+    window.addEventListener('resize', handleResize);
+
+    const handleKeyDown = (event) => {
+      let moved = false;
+
+      switch (event.key) {
+        case 'ArrowLeft':
+          if (cursorState.col > 0) {
+            cursorState.col -= 1;
+            moved = true;
+          }
+          break;
+        case 'ArrowRight':
+          if (cursorState.col < gridSize - 2) {
+            cursorState.col += 1;
+            moved = true;
+          }
+          break;
+        case 'ArrowUp':
+          if (cursorState.row > 0) {
+            cursorState.row -= 1;
+            moved = true;
+          }
+          break;
+        case 'ArrowDown':
+          if (cursorState.row < gridSize - 1) {
+            cursorState.row += 1;
+            moved = true;
+          }
+          break;
+        default:
+          break;
+      }
+
+      if (moved) {
+        event.preventDefault();
+        updateCursorPosition();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    const animate = () => {
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    };
+
+    animate();
+  </script>
+</body>
+</html>
