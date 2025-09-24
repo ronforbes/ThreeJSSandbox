@@ -16,12 +16,15 @@
     scene.background = new THREE.Color(0x202533);
 
     const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.set(0, 8, 12);
+    camera.position.set(0, 0, 20);
     camera.lookAt(0, 0, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
+
+    const boardGroup = new THREE.Group();
+    scene.add(boardGroup);
 
     const gridSize = 10;
     const spacing = 1.4;
@@ -51,7 +54,7 @@
       }
     }
 
-    scene.add(cubeGroup);
+    boardGroup.add(cubeGroup);
 
     const cursorEdgesGeometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(1.05, 1.05, 1.05));
     const cursorMaterial = new THREE.LineBasicMaterial({ color: 0xffffff });
@@ -68,7 +71,7 @@
     const cursorGroup = new THREE.Group();
     cursorGroup.add(cursorLeft, cursorRight);
     cursorGroup.renderOrder = 1;
-    scene.add(cursorGroup);
+    boardGroup.add(cursorGroup);
 
     const cursorState = {
       col: Math.floor((gridSize - 2) / 2),
@@ -123,6 +126,9 @@
     };
 
     updateCursorPosition();
+
+    boardGroup.rotation.x = -Math.PI / 2;
+    boardGroup.scale.z = -1;
 
     const updateSwapAnimation = (time = performance.now()) => {
       if (!currentSwap) {
