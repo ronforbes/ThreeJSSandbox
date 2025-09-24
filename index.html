@@ -33,7 +33,11 @@
 
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const colorPalette = [0xff5533, 0x209cee, 0xffdd57, 0x23d160, 0xb86bff, 0xff9f1c];
-    const materials = colorPalette.map(color => new THREE.MeshStandardMaterial({ color }));
+    const materials = colorPalette.map((color, index) => {
+      const material = new THREE.MeshStandardMaterial({ color });
+      material.userData.colorId = index;
+      return material;
+    });
 
     const cubeGroup = new THREE.Group();
     const cubeGrid = Array.from({ length: gridSize }, () => Array(gridSize).fill(null));
@@ -42,12 +46,24 @@
       const x = col * spacing - offset;
       const z = row * spacing - offset;
       cube.position.set(x, 0, z);
+
+      if (!cube.userData) {
+        cube.userData = {};
+      }
+      cube.userData.row = row;
+      cube.userData.col = col;
     }
 
     for (let row = 0; row < gridSize; row += 1) {
       for (let col = 0; col < gridSize; col += 1) {
-        const material = materials[Math.floor(Math.random() * materials.length)];
+        const colorIndex = Math.floor(Math.random() * materials.length);
+        const material = materials[colorIndex];
         const cube = new THREE.Mesh(geometry, material);
+        cube.userData = {
+          row,
+          col,
+          colorId: colorIndex,
+        };
         setCubePosition(cube, row, col);
         cubeGroup.add(cube);
         cubeGrid[row][col] = cube;
@@ -79,8 +95,15 @@
     };
 
     const swapDurationMs = 100;
-    let isSwapInProgress = false;
+    const flashDurationMs = 1000;
+    const popIntervalMs = 100;
+    const fallDurationMs = 100;
+
+    let boardBusy = false;
     let currentSwap = null;
+    let currentFlash = null;
+    let currentPop = null;
+    let currentGravity = null;
 
     const updateCursorPosition = () => {
       const x = (cursorState.col + 0.5) * spacing - offset;
@@ -88,8 +111,179 @@
       cursorGroup.position.set(x, 0, z);
     };
 
+    const findMatches = () => {
+      const matches = [];
+      const seen = new Set();
+
+      const recordRun = (cells) => {
+        cells.forEach((cell) => {
+          const { row, col, cube } = cell;
+          if (!cube) {
+            return;
+          }
+          const key = `${row}:${col}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            matches.push({ row, col, cube });
+          }
+        });
+      };
+
+      for (let row = 0; row < gridSize; row += 1) {
+        let lastColor = null;
+        let run = [];
+        for (let col = 0; col < gridSize; col += 1) {
+          const cube = cubeGrid[row][col];
+          const color = cube ? cube.userData.colorId : null;
+
+          if (cube && color === lastColor) {
+            run.push({ row, col, cube });
+          } else {
+            if (run.length >= 3) {
+              recordRun(run);
+            }
+            run = cube ? [{ row, col, cube }] : [];
+            lastColor = color;
+          }
+        }
+
+        if (run.length >= 3) {
+          recordRun(run);
+        }
+      }
+
+      for (let col = 0; col < gridSize; col += 1) {
+        let lastColor = null;
+        let run = [];
+        for (let row = 0; row < gridSize; row += 1) {
+          const cube = cubeGrid[row][col];
+          const color = cube ? cube.userData.colorId : null;
+
+          if (cube && color === lastColor) {
+            run.push({ row, col, cube });
+          } else {
+            if (run.length >= 3) {
+              recordRun(run);
+            }
+            run = cube ? [{ row, col, cube }] : [];
+            lastColor = color;
+          }
+        }
+
+        if (run.length >= 3) {
+          recordRun(run);
+        }
+      }
+
+      return matches;
+    };
+
+    const startFlash = (matches, startTime = performance.now()) => {
+      const entries = matches.filter((match) => match.cube && cubeGrid[match.row][match.col] === match.cube);
+
+      if (entries.length === 0) {
+        startGravity(startTime);
+        return;
+      }
+
+      currentFlash = {
+        matches: entries,
+        startTime,
+        duration: flashDurationMs,
+      };
+      boardBusy = true;
+    };
+
+    const startPop = (matches, startTime = performance.now()) => {
+      const entries = matches
+        .filter((match) => match.cube && cubeGrid[match.row][match.col] === match.cube)
+        .sort((a, b) => (a.row - b.row) || (a.col - b.col))
+        .map((match, index) => ({
+          row: match.row,
+          col: match.col,
+          cube: match.cube,
+          index,
+          popped: false,
+        }));
+
+      if (entries.length === 0) {
+        startGravity(startTime);
+        return;
+      }
+
+      currentPop = {
+        entries,
+        startTime,
+        durationPer: popIntervalMs,
+      };
+    };
+
+    const computeGravityStep = () => {
+      const falls = [];
+
+      for (let col = 0; col < gridSize; col += 1) {
+        for (let row = gridSize - 2; row >= 0; row -= 1) {
+          const cube = cubeGrid[row][col];
+          if (!cube) {
+            continue;
+          }
+
+          if (!cubeGrid[row + 1][col]) {
+            const startPos = cube.position.clone();
+            const targetPos = new THREE.Vector3(col * spacing - offset, 0, (row + 1) * spacing - offset);
+
+            falls.push({
+              cube,
+              fromRow: row,
+              toRow: row + 1,
+              col,
+              startPos,
+              targetPos,
+            });
+
+            cubeGrid[row][col] = null;
+            cubeGrid[row + 1][col] = cube;
+          }
+        }
+      }
+
+      return falls;
+    };
+
+    const startGravity = (startTime = performance.now()) => {
+      const falls = computeGravityStep();
+
+      if (falls.length === 0) {
+        const matches = findMatches();
+        if (matches.length > 0) {
+          startFlash(matches, startTime);
+        } else {
+          boardBusy = false;
+        }
+        return;
+      }
+
+      boardBusy = true;
+      currentGravity = {
+        falls,
+        startTime,
+        duration: fallDurationMs,
+      };
+    };
+
+    const processMatches = (time = performance.now()) => {
+      const matches = findMatches();
+
+      if (matches.length === 0) {
+        boardBusy = false;
+        return;
+      }
+
+      startFlash(matches, time);
+    };
+
     const swapSelectedCubes = () => {
-      if (isSwapInProgress) {
+      if (boardBusy) {
         return;
       }
 
@@ -109,7 +303,7 @@
       const leftTarget = new THREE.Vector3(rightCol * spacing - offset, 0, row * spacing - offset);
       const rightTarget = new THREE.Vector3(leftCol * spacing - offset, 0, row * spacing - offset);
 
-      isSwapInProgress = true;
+      boardBusy = true;
       currentSwap = {
         row,
         leftCol,
@@ -149,7 +343,97 @@
         setCubePosition(currentSwap.leftCube, currentSwap.row, currentSwap.rightCol);
 
         currentSwap = null;
-        isSwapInProgress = false;
+        processMatches(time);
+      }
+    };
+
+    const updateFlashAnimation = (time = performance.now()) => {
+      if (!currentFlash) {
+        return;
+      }
+
+      const elapsed = time - currentFlash.startTime;
+      const onPhase = Math.floor(elapsed / 150) % 2 === 0;
+
+      currentFlash.matches.forEach((match) => {
+        if (match.cube) {
+          match.cube.visible = onPhase;
+        }
+      });
+
+      if (elapsed >= currentFlash.duration) {
+        currentFlash.matches.forEach((match) => {
+          if (match.cube) {
+            match.cube.visible = true;
+          }
+        });
+
+        const matches = currentFlash.matches;
+        currentFlash = null;
+        startPop(matches, time);
+      }
+    };
+
+    const updatePopAnimation = (time = performance.now()) => {
+      if (!currentPop) {
+        return;
+      }
+
+      let allDone = true;
+
+      currentPop.entries.forEach((entry) => {
+        const { cube, index } = entry;
+        if (!cube) {
+          return;
+        }
+
+        const localElapsed = time - currentPop.startTime - index * currentPop.durationPer;
+
+        if (localElapsed < 0) {
+          cube.scale.set(1, 1, 1);
+          allDone = false;
+          return;
+        }
+
+        const progress = Math.min(localElapsed / currentPop.durationPer, 1);
+        const scaleValue = Math.max(1 - progress, 0);
+        cube.scale.set(scaleValue, scaleValue, scaleValue);
+
+        if (progress < 1) {
+          allDone = false;
+        } else if (!entry.popped) {
+          cubeGroup.remove(cube);
+          cube.visible = false;
+          cube.scale.set(1, 1, 1);
+          cubeGrid[entry.row][entry.col] = null;
+          entry.popped = true;
+        }
+      });
+
+      if (allDone) {
+        currentPop = null;
+        startGravity(time);
+      }
+    };
+
+    const updateGravityAnimation = (time = performance.now()) => {
+      if (!currentGravity) {
+        return;
+      }
+
+      const elapsed = time - currentGravity.startTime;
+      const progress = Math.min(elapsed / currentGravity.duration, 1);
+
+      currentGravity.falls.forEach((fall) => {
+        fall.cube.position.lerpVectors(fall.startPos, fall.targetPos, progress);
+      });
+
+      if (progress >= 1) {
+        currentGravity.falls.forEach((fall) => {
+          setCubePosition(fall.cube, fall.toRow, fall.col);
+        });
+        currentGravity = null;
+        startGravity(time);
       }
     };
 
@@ -208,7 +492,7 @@
       if (event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar') {
         event.preventDefault();
 
-        if (!isSwapInProgress) {
+        if (!boardBusy) {
           swapSelectedCubes();
         }
       }
@@ -218,6 +502,9 @@
 
     const animate = (time) => {
       updateSwapAnimation(time);
+      updateFlashAnimation(time);
+      updatePopAnimation(time);
+      updateGravityAnimation(time);
       renderer.render(scene, camera);
       requestAnimationFrame(animate);
     };
