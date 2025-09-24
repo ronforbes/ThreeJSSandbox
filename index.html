@@ -33,13 +33,21 @@
     const materials = colorPalette.map(color => new THREE.MeshStandardMaterial({ color }));
 
     const cubeGroup = new THREE.Group();
+    const cubeGrid = Array.from({ length: gridSize }, () => Array(gridSize).fill(null));
+
+    function setCubePosition(cube, row, col) {
+      const x = col * spacing - offset;
+      const z = row * spacing - offset;
+      cube.position.set(x, 0, z);
+    }
 
     for (let row = 0; row < gridSize; row += 1) {
       for (let col = 0; col < gridSize; col += 1) {
         const material = materials[Math.floor(Math.random() * materials.length)];
         const cube = new THREE.Mesh(geometry, material);
-        cube.position.set(col * spacing - offset, 0, row * spacing - offset);
+        setCubePosition(cube, row, col);
         cubeGroup.add(cube);
+        cubeGrid[row][col] = cube;
       }
     }
 
@@ -67,13 +75,77 @@
       row: Math.floor((gridSize - 1) / 2),
     };
 
+    const swapDurationMs = 100;
+    let isSwapInProgress = false;
+    let currentSwap = null;
+
     const updateCursorPosition = () => {
       const x = (cursorState.col + 0.5) * spacing - offset;
       const z = cursorState.row * spacing - offset;
       cursorGroup.position.set(x, 0, z);
     };
 
+    const swapSelectedCubes = () => {
+      if (isSwapInProgress) {
+        return;
+      }
+
+      const row = cursorState.row;
+      const leftCol = cursorState.col;
+      const rightCol = leftCol + 1;
+      const leftCube = cubeGrid[row][leftCol];
+      const rightCube = cubeGrid[row][rightCol];
+
+      if (!leftCube || !rightCube) {
+        return;
+      }
+
+      const swapStart = performance.now();
+      const leftStart = leftCube.position.clone();
+      const rightStart = rightCube.position.clone();
+      const leftTarget = new THREE.Vector3(rightCol * spacing - offset, 0, row * spacing - offset);
+      const rightTarget = new THREE.Vector3(leftCol * spacing - offset, 0, row * spacing - offset);
+
+      isSwapInProgress = true;
+      currentSwap = {
+        row,
+        leftCol,
+        rightCol,
+        leftCube,
+        rightCube,
+        startTime: swapStart,
+        duration: swapDurationMs,
+        leftStart,
+        rightStart,
+        leftTarget,
+        rightTarget,
+      };
+    };
+
     updateCursorPosition();
+
+    const updateSwapAnimation = (time = performance.now()) => {
+      if (!currentSwap) {
+        return;
+      }
+
+      const elapsed = time - currentSwap.startTime;
+      const progress = Math.min(elapsed / currentSwap.duration, 1);
+
+      currentSwap.leftCube.position.lerpVectors(currentSwap.leftStart, currentSwap.leftTarget, progress);
+      currentSwap.rightCube.position.lerpVectors(currentSwap.rightStart, currentSwap.rightTarget, progress);
+
+      if (progress >= 1) {
+        cubeGrid[currentSwap.row][currentSwap.leftCol] = currentSwap.rightCube;
+        cubeGrid[currentSwap.row][currentSwap.rightCol] = currentSwap.leftCube;
+
+        setCubePosition(currentSwap.rightCube, currentSwap.row, currentSwap.leftCol);
+        setCubePosition(currentSwap.leftCube, currentSwap.row, currentSwap.rightCol);
+
+        currentSwap = null;
+        isSwapInProgress = false;
+      }
+    };
 
     const light = new THREE.DirectionalLight(0xffffff, 1);
     light.position.set(6, 10, 8);
@@ -124,17 +196,27 @@
       if (moved) {
         event.preventDefault();
         updateCursorPosition();
+        return;
+      }
+
+      if (event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar') {
+        event.preventDefault();
+
+        if (!isSwapInProgress) {
+          swapSelectedCubes();
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
 
-    const animate = () => {
+    const animate = (time) => {
+      updateSwapAnimation(time);
       renderer.render(scene, camera);
       requestAnimationFrame(animate);
     };
 
-    animate();
+    requestAnimationFrame(animate);
   </script>
 </body>
 </html>
